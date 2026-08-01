@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lacrosse}
+      POSTGRES_USER: ${POSTGRES_USER:-lacrosse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Read by db/init/00-create-readonly-role.sh on first initialization,
+      # to provision a SELECT-only role for a future read-only consumer
+      # (e.g. a web dashboard added as a later service in this file). Runs
+      # before the restore script below -- a restored backup's GRANT
+      # statements reference this role, which must already exist.
+      WEBAPP_DB_USER: ${WEBAPP_DB_USER:-lacrosse_readonly}
+      WEBAPP_DB_PASSWORD: ${WEBAPP_DB_PASSWORD:-}
+      # Read by db/init/01-restore-from-backup.sh on first initialization.
+      # If a backup is found at BACKUP_HOST_PATH, it's restored automatically
+      # instead of starting empty. Set to "false" to always start empty.
+      POSTGRES_AUTO_RESTORE_ON_INIT: ${POSTGRES_AUTO_RESTORE_ON_INIT:-true}
+    volumes:
+      # Named volume -- persists across `docker compose build`/`up --build`
+      # and container recreation, and lives on Docker's own Linux-native
+      # storage rather than a bind-mounted host path, which Postgres warns
+      # against for its live data directory (fsync/locking semantics don't
+      # always match on non-native filesystems). Only removed by an explicit
+      # `docker compose down -v` or `docker volume rm`. If the volume is ever
+      # lost anyway, 01-restore-from-backup.sh below recovers from the most
+      # recent nightly backup automatically.
+      - pgdata:/var/lib/postgresql/data
+      # Only runs on first initialization of an empty data directory.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # Read-only access to the same backup files the `backup` service
+      # writes, so 01-restore-from-backup.sh can find the latest one.
+      - ${BACKUP_HOST_PATH:?BACKUP_HOST_PATH must be set in .env}:/backups-restore:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lacrosse} -d ${POSTGRES_DB:-lacrosse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LACROSSE_EMAIL: ${LACROSSE_EMAIL:?LACROSSE_EMAIL must be set in .env}
+      LACROSSE_PASSWORD: ${LACROSSE_PASSWORD:?LACROSSE_PASSWORD must be set in .env}
+      # Passed as discrete pieces rather than a "postgresql://user:pass@host/db"
+      # URI -- a URI requires percent-encoding special characters in the
+      # password, which collector.py deliberately avoids by using
+      # psycopg.connect() keyword arguments instead.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-lacrosse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-lacrosse}
+      LACROSSE_TIMEZONE: ${LACROSSE_TIMEZONE:-UTC}
+      COLLECTION_INTERVAL_MINUTES: ${COLLECTION_INTERVAL_MINUTES:-15}
+      LACROSSE_INITIAL_LOOKBACK_MINUTES: ${LACROSSE_INITIAL_LOOKBACK_MINUTES:-60}
+      LACROSSE_OVERLAP_MINUTES: ${LACROSSE_OVERLAP_MINUTES:-10}
+      LACROSSE_LOCATION_INDEX: ${LACROSSE_LOCATION_INDEX:-}
+      LACROSSE_BACKFILL_FULL_HISTORY: ${LACROSSE_BACKFILL_FULL_HISTORY:-false}
+      LACROSSE_BACKFILL_START_DATE: ${LACROSSE_BACKFILL_START_DATE:-2000-01-01}
+      LACROSSE_BACKFILL_CHUNK_DAYS: ${LACROSSE_BACKFILL_CHUNK_DAYS:-7}
+      LACROSSE_BACKFILL_DELAY_SECONDS: ${LACROSSE_BACKFILL_DELAY_SECONDS:-30}
+      LACROSSE_BACKFILL_STALL_LIMIT: ${LACROSSE_BACKFILL_STALL_LIMIT:-3}
+
+  # Nightly (by default) pg_dump backups to a separate volume, independent of
+  # the live data volume. Schedule and retention are customizable via .env.
+  backup:
+    image: prodrigestivill/postgres-backup-local:16-alpine
+    restart: unless-stopped
+    # Runs as root. Tested running as the image's non-root "postgres" user
+    # (70:70) and it failed with permission denied writing to the Windows
+    # bind-mounted BACKUP_HOST_PATH -- Docker Desktop's bind-mount ownership
+    # translation didn't cooperate. Staying root here since a working
+    # backup matters more than this specific hardening.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Bind mount (not a named volume) so backup files are directly browsable
+      # on the host, separate from Docker's internal storage for pgdata --
+      # point a separate backup/sync tool at this same path for off-site
+      # redundancy.
+      - ${BACKUP_HOST_PATH:?BACKUP_HOST_PATH must be set in .env}:/backups
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-lacrosse}
+      POSTGRES_USER: ${POSTGRES_USER:-lacrosse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Cron schedule (or @daily/@weekly/etc). Default: once a day.
+      SCHEDULE: ${BACKUP_SCHEDULE:-@daily}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+      BACKUP_KEEP_WEEKS: ${BACKUP_KEEP_WEEKS:-4}
+      BACKUP_KEEP_MONTHS: ${BACKUP_KEEP_MONTHS:-6}
+
+volumes:
+  pgdata:

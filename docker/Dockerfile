@@ -6,7 +6,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY collector.py .
+COPY collector.py heartbeat.py healthcheck.py .
 COPY db/ ./db/
 
 # No credentials or .env files are copied into the image -- they're supplied

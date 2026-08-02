@@ -25,12 +25,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple, Optional
 
 import psycopg
 from lacrosse_view import LaCrosse, LaCrosseError, Location, Sensor
+
+import heartbeat
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("collector")
@@ -407,10 +410,44 @@ async def run_once(conn: psycopg.Connection) -> None:
     await maybe_backfill_older(conn, locations)
 
 
+def _watchdog_loop() -> None:
+    """Runs on its own thread so it keeps checking even if the asyncio event
+    loop is genuinely wedged (a hung network call with no timeout, a
+    deadlock) -- exactly the case a heartbeat file is meant to catch, since
+    that's the one failure mode the try/except in main_loop() below can't
+    help with (the code never gets back around to hitting it).
+
+    Deliberately exits the whole process (not just logs a warning) so
+    `restart: unless-stopped` in docker-compose.yml gives it a clean restart.
+    docker-compose's own `healthcheck:` only affects reported status, not
+    restart behavior -- this is what actually recovers a stuck collector
+    under plain Docker/Compose. Under Kubernetes, the equivalent
+    livenessProbe would trigger a restart on its own, making this redundant
+    there but harmless to leave in.
+    """
+    threshold = heartbeat.stale_after_seconds()
+    while True:
+        time.sleep(60)
+        age = heartbeat.age_seconds()
+        if age is not None and age > threshold:
+            log.error(
+                "No heartbeat in %.0fs (threshold %.0fs) -- assuming the "
+                "main loop is stuck. Exiting so the container restarts.",
+                age, threshold,
+            )
+            os._exit(1)
+
+
 async def main_loop() -> None:
     conn = connect_db()
     ensure_schema(conn)
     interval_seconds = INTERVAL_MINUTES * 60
+
+    # Seed the heartbeat before starting the watchdog, so the very first
+    # cycle gets a full stale_after_seconds() window rather than looking
+    # instantly stale (no heartbeat file yet) the moment the watchdog wakes up.
+    heartbeat.touch()
+    threading.Thread(target=_watchdog_loop, daemon=True).start()
 
     while True:
         try:
@@ -427,6 +464,11 @@ async def main_loop() -> None:
         except Exception:
             log.exception("Unexpected error during collection cycle")
 
+        # Touched after every cycle attempt, success or caught failure alike
+        # -- a cleanly logged error still means the loop is alive and will
+        # retry next interval. Only a cycle that never returns at all (truly
+        # stuck) leaves this stale.
+        heartbeat.touch()
         await asyncio.sleep(interval_seconds)
 
 

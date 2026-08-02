@@ -82,6 +82,20 @@ services:
       LACROSSE_BACKFILL_CHUNK_DAYS: ${LACROSSE_BACKFILL_CHUNK_DAYS:-7}
       LACROSSE_BACKFILL_DELAY_SECONDS: ${LACROSSE_BACKFILL_DELAY_SECONDS:-30}
       LACROSSE_BACKFILL_STALL_LIMIT: ${LACROSSE_BACKFILL_STALL_LIMIT:-3}
+    # Checks heartbeat.py's file, touched after every collection cycle
+    # attempt (success or caught failure) -- catches the one thing the
+    # try/except in main_loop() can't: a cycle that never returns at all
+    # (hung call, deadlock). Note this only affects reported status here,
+    # not restart behavior -- collector.py's own watchdog thread handles
+    # actually restarting under plain Docker/Compose (see its docstring).
+    # The same `python3 healthcheck.py` command becomes a Kubernetes
+    # livenessProbe's exec command unchanged if this image runs there later.
+    healthcheck:
+      test: ["CMD", "python3", "healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
 
   # Nightly (by default) pg_dump backups to a separate volume, independent of
   # the live data volume. Schedule and retention are customizable via .env.

@@ -1,0 +1,66 @@
+name: Publish container images
+
+# Builds the collector and webapp images and pushes them to GitHub Container
+# Registry (ghcr.io), so a separate deployment (another server, Kubernetes)
+# can pull a pre-built, versioned image instead of needing this source tree
+# and Docker installed to build one locally. `docker compose build`/
+# `up --build` are unaffected -- this only runs in GitHub's CI.
+#
+# Tags produced:
+#   latest        -- on every push to master (rolling)
+#   sha-<short>   -- on every build, for pinning to an exact commit
+#   <version>     -- on a pushed tag like v1.2.3 (also updates `latest`)
+#
+# One-time manual step after this workflow's first successful run: GHCR
+# creates new packages as PRIVATE by default, even though this repo is
+# public. Go to your GitHub profile -> Packages -> lacrosse-collector (and
+# lacrosse-webapp) -> Package settings -> Change visibility -> Public, or a
+# `docker pull` of these images (e.g. from Kubernetes) will get a 401/403.
+on:
+  push:
+    branches: [master]
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: lacrosse-collector
+            dockerfile: docker/Dockerfile
+          - image: lacrosse-webapp
+            dockerfile: docker/Dockerfile.webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=semver,pattern={{version}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

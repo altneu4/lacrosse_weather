@@ -127,6 +127,15 @@
     cursor: pointer;
     font-size: 0.8rem;
   }
+  .sidebar-select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.8rem;
+  }
   #content {
     flex: 1;
     min-width: 320px;
@@ -176,6 +185,14 @@
       </div>
     </details>
 
+    <h2 style="margin-top:18px;">Compare To</h2>
+    <select class="sidebar-select" id="compare-select">
+      <option value="none">None</option>
+      <option value="previous">Previous period</option>
+      <option value="month">Same time, 1 month ago</option>
+      <option value="year">Same time, 1 year ago</option>
+    </select>
+
     <h2 style="margin-top:18px;">Temperature Units</h2>
     <div class="range-buttons" id="temp-unit-buttons">
       <button data-unit="C" class="active">&deg;C</button>
@@ -205,6 +222,7 @@ let currentRange = "24h";
 let customStart = null;
 let customEnd = null;
 let tempUnit = "C"; // "C" or "F" -- only affects fields stored in degrees_celsius
+let compareMode = "none"; // "none" | "previous" | "month" | "year"
 let chart = null;
 let allSeriesMeta = {}; // key "deviceId|field" -> { deviceName, locationName, field, unit }
 
@@ -318,6 +336,58 @@ function rangeQueryParams() {
   return `range=${encodeURIComponent(currentRange)}`;
 }
 
+const RANGE_DURATIONS_MS = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000,
+};
+
+// Mirrors how the backend resolves "current period" bounds (RANGE_PRESETS in
+// app.py), so the comparison window below is computed from the same start/end
+// the primary series actually used -- not a separate guess at it.
+function getCurrentBounds() {
+  if (customStart && customEnd) {
+    return { start: new Date(customStart), end: new Date(customEnd) };
+  }
+  const end = new Date();
+  const start = new Date(end.getTime() - RANGE_DURATIONS_MS[currentRange]);
+  return { start, end };
+}
+
+// Returns the shifted {start, end} to fetch, plus offsetMs: the amount to
+// ADD to each returned point's timestamp so it lands on the *current*
+// period's x-axis, directly overlaid for visual comparison. offsetMs is
+// computed as an actual millisecond difference rather than assumed from a
+// fixed duration, so calendar shifts (a month/year isn't a fixed number of
+// days) still align correctly.
+function getComparisonBounds() {
+  if (compareMode === "none") return null;
+  const { start, end } = getCurrentBounds();
+
+  if (compareMode === "previous") {
+    const duration = end.getTime() - start.getTime();
+    const compStart = new Date(start.getTime() - duration);
+    return { start: compStart, end: new Date(start.getTime()), offsetMs: duration };
+  }
+
+  const shiftCalendar = (d) => {
+    const copy = new Date(d.getTime());
+    if (compareMode === "month") copy.setMonth(copy.getMonth() - 1);
+    else if (compareMode === "year") copy.setFullYear(copy.getFullYear() - 1);
+    return copy;
+  };
+  const compStart = shiftCalendar(start);
+  const compEnd = shiftCalendar(end);
+  return { start: compStart, end: compEnd, offsetMs: start.getTime() - compStart.getTime() };
+}
+
+const COMPARE_LABELS = {
+  previous: "previous period",
+  month: "1 month ago",
+  year: "1 year ago",
+};
+
 function formatTick(value, spanMs) {
   const d = new Date(value);
   if (spanMs <= 26 * 60 * 60 * 1000) {
@@ -395,6 +465,49 @@ async function refreshChart() {
       };
     });
 
+    // Overlay a time-shifted comparison series per selected sensor, if
+    // enabled. Fetched with explicit start/end (not range=) since the
+    // window is calendar-shifted, then each point's timestamp is nudged by
+    // offsetMs so it draws directly on top of the current period's x-axis
+    // -- same color as its live counterpart, dashed, thinner.
+    const comparisonBounds = getComparisonBounds();
+    let comparisonResults = [];
+    if (comparisonBounds) {
+      const compareFetches = checkboxes.map(async (cb, i) => {
+        const deviceId = cb.dataset.deviceId;
+        const field = cb.dataset.field;
+        const url = `/api/readings?device_id=${encodeURIComponent(deviceId)}&field=${encodeURIComponent(field)}` +
+          `&start=${encodeURIComponent(comparisonBounds.start.toISOString())}` +
+          `&end=${encodeURIComponent(comparisonBounds.end.toISOString())}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status} for ${field} (comparison)`);
+        const data = await res.json();
+        return { key: cb.dataset.key, data, colorIndex: i };
+      });
+      comparisonResults = await Promise.all(compareFetches);
+
+      const compareLabel = COMPARE_LABELS[compareMode];
+      for (const r of comparisonResults) {
+        const meta = allSeriesMeta[r.key];
+        const rawUnit = r.data.unit || "value";
+        const unit = displayUnitFor(rawUnit);
+        datasets.push({
+          label: `${meta.locationName} / ${meta.deviceName} / ${meta.field} (${compareLabel})`,
+          data: r.data.points.map(p => ({
+            x: new Date(p.ts).getTime() + comparisonBounds.offsetMs,
+            y: convertValue(p.value, rawUnit),
+          })),
+          borderColor: COLORS[r.colorIndex % COLORS.length],
+          backgroundColor: COLORS[r.colorIndex % COLORS.length],
+          yAxisID: `y-${unit}`,
+          pointRadius: 0,
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          tension: 0.15,
+        });
+      }
+    }
+
     emptyStateEl.style.display = "none";
     canvasEl.style.display = "block";
 
@@ -420,8 +533,10 @@ async function refreshChart() {
       });
     }
 
-    const totalPoints = seriesResults.reduce((sum, r) => sum + r.data.points.length, 0);
-    setStatus(`Updated ${new Date().toLocaleTimeString()} — ${totalPoints} point(s) across ${keys.length} series.`);
+    const totalPoints = seriesResults.reduce((sum, r) => sum + r.data.points.length, 0) +
+      comparisonResults.reduce((sum, r) => sum + r.data.points.length, 0);
+    const compareNote = comparisonBounds ? ` (with ${COMPARE_LABELS[compareMode]} overlay)` : "";
+    setStatus(`Updated ${new Date().toLocaleTimeString()} — ${totalPoints} point(s) across ${keys.length} series${compareNote}.`);
   } catch (err) {
     setStatus(`Failed to load readings: ${err.message}`, true);
   }
@@ -434,6 +549,11 @@ document.getElementById("range-buttons").addEventListener("click", (e) => {
   customEnd = null;
   currentRange = btn.dataset.range;
   document.querySelectorAll("#range-buttons button").forEach(b => b.classList.toggle("active", b === btn));
+  refreshChart();
+});
+
+document.getElementById("compare-select").addEventListener("change", (e) => {
+  compareMode = e.target.value;
   refreshChart();
 });
 

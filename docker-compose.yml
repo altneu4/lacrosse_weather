@@ -40,6 +40,12 @@ services:
       retries: 10
 
   collector:
+    # `image:` names the result of `build:` below for local dev (`docker
+    # compose build`/`up --build` still works exactly as before) and doubles
+    # as the tag pushed to GHCR by .github/workflows/publish-images.yml, so a
+    # separate deployment (another server, Kubernetes) can just `docker pull`
+    # / reference this image instead of needing the source tree to build it.
+    image: ghcr.io/altneu4/lacrosse-collector:latest
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -105,6 +111,9 @@ services:
   # db/init/00-create-readonly-role.sh) -- it can never modify collected
   # data, even if the app itself has a bug.
   webapp:
+    # See the same note on the collector service above -- this is also built
+    # and pushed to GHCR by .github/workflows/publish-images.yml.
+    image: ghcr.io/altneu4/lacrosse-webapp:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.webapp

@@ -1,0 +1,5 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+psycopg[binary]>=3.1
+slowapi>=0.1.9
+limits>=3.0

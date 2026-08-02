@@ -7,10 +7,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-lacrosse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       # Read by db/init/00-create-readonly-role.sh on first initialization,
-      # to provision a SELECT-only role for a future read-only consumer
-      # (e.g. a web dashboard added as a later service in this file). Runs
-      # before the restore script below -- a restored backup's GRANT
-      # statements reference this role, which must already exist.
+      # to provision the SELECT-only role the webapp service below connects
+      # with. Runs before the restore script below -- a restored backup's
+      # GRANT statements reference this role, which must already exist.
+      # Left optional here (unlike the webapp service's own required check)
+      # so a deployment that never runs the webapp doesn't need this set.
       WEBAPP_DB_USER: ${WEBAPP_DB_USER:-lacrosse_readonly}
       WEBAPP_DB_PASSWORD: ${WEBAPP_DB_PASSWORD:-}
       # Read by db/init/01-restore-from-backup.sh on first initialization.
@@ -98,6 +99,34 @@ services:
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
       BACKUP_KEEP_WEEKS: ${BACKUP_KEEP_WEEKS:-4}
       BACKUP_KEEP_MONTHS: ${BACKUP_KEEP_MONTHS:-6}
+
+  # Read-only dashboard: pick sensors and a timeline, see a chart. Connects
+  # to Postgres with the lacrosse_readonly role (see
+  # db/init/00-create-readonly-role.sh) -- it can never modify collected
+  # data, even if the app itself has a bug.
+  webapp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.webapp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Published on the host so it's reachable from other devices on your
+    # LAN. No login is required in front of it yet -- fine for a home
+    # network, but add one first (e.g. a reverse proxy with basic auth)
+    # before exposing this port beyond your LAN (port forwarding, etc).
+    ports:
+      - "${WEBAPP_PORT:-8080}:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-lacrosse}
+      WEBAPP_DB_USER: ${WEBAPP_DB_USER:-lacrosse_readonly}
+      # Required here (unlike the optional default on the postgres service
+      # above) -- the dashboard can't do anything useful without this role,
+      # so fail fast with a clear message instead of a psycopg error.
+      WEBAPP_DB_PASSWORD: ${WEBAPP_DB_PASSWORD:?WEBAPP_DB_PASSWORD must be set in .env to use the web dashboard}
 
 volumes:
   pgdata:

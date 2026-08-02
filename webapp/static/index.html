@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La Crosse Weather Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #1a2632;
+    --border: #2c3b4a;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4fa3e3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  header p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  main {
+    display: flex;
+    gap: 20px;
+    padding: 20px 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  #sidebar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    min-width: 240px;
+    max-width: 300px;
+    flex-shrink: 0;
+  }
+  #sidebar h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .location-group { margin-bottom: 14px; }
+  .location-group > summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 4px 0;
+  }
+  .device-group { margin: 4px 0 4px 12px; }
+  .device-group > .device-name {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin: 4px 0 2px;
+  }
+  .field-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0 2px 12px;
+    font-size: 0.85rem;
+  }
+  .field-checkbox input { accent-color: var(--accent); }
+  .range-buttons {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .range-buttons button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .range-buttons button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06131f;
+    font-weight: 600;
+  }
+  .custom-range {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .custom-range label {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .custom-range input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+  }
+  .custom-range button {
+    margin-top: 4px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  #content {
+    flex: 1;
+    min-width: 320px;
+  }
+  #chart-container {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    height: 480px;
+    position: relative;
+  }
+  #status {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  #status.error { color: #e36f6f; }
+  #empty-state {
+    color: var(--muted);
+    text-align: center;
+    margin-top: 60px;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>La Crosse Weather Dashboard</h1>
+  <p>Select one or more sensors and a timeline to plot.</p>
+</header>
+<main>
+  <aside id="sidebar">
+    <h2>Timeline</h2>
+    <div class="range-buttons" id="range-buttons">
+      <button data-range="24h" class="active">24h</button>
+      <button data-range="7d">7d</button>
+      <button data-range="30d">30d</button>
+      <button data-range="90d">90d</button>
+    </div>
+    <details class="custom-range-toggle">
+      <summary style="cursor:pointer; font-size:0.8rem; color:var(--muted);">Custom range</summary>
+      <div class="custom-range">
+        <label>Start<input type="datetime-local" id="custom-start"></label>
+        <label>End<input type="datetime-local" id="custom-end"></label>
+        <button id="apply-custom-range">Apply</button>
+      </div>
+    </details>
+
+    <h2 style="margin-top:18px;">Temperature Units</h2>
+    <div class="range-buttons" id="temp-unit-buttons">
+      <button data-unit="C" class="active">&deg;C</button>
+      <button data-unit="F">&deg;F</button>
+    </div>
+
+    <h2 style="margin-top:18px;">Sensors</h2>
+    <div id="sensor-tree">Loading&hellip;</div>
+  </aside>
+
+  <section id="content">
+    <div id="chart-container">
+      <div id="empty-state">Select a sensor from the left to plot data.</div>
+      <canvas id="chart" style="display:none;"></canvas>
+    </div>
+    <div id="status"></div>
+  </section>
+</main>
+
+<script>
+const COLORS = [
+  "#4fa3e3", "#e3944f", "#7ce34f", "#e34f8f", "#c34fe3",
+  "#e3d64f", "#4fe3c9", "#e35a4f", "#8f4fe3", "#4fe37c",
+];
+
+let currentRange = "24h";
+let customStart = null;
+let customEnd = null;
+let tempUnit = "C"; // "C" or "F" -- only affects fields stored in degrees_celsius
+let chart = null;
+let allSeriesMeta = {}; // key "deviceId|field" -> { deviceName, locationName, field, unit }
+
+const UNIT_LABELS = {
+  degrees_celsius: "°C",
+  degrees_fahrenheit: "°F",
+  relative_humidity: "%RH",
+  millibars: "mb",
+  kilometers_per_hour: "km/h",
+  inches: "in",
+  degrees: "°",
+};
+
+function friendlyUnit(unit) {
+  return UNIT_LABELS[unit] || unit || "";
+}
+
+// Only Celsius readings are converted; everything else (including fields
+// the API already reports in Fahrenheit, like HeatIndex) passes through
+// unchanged regardless of the toggle.
+function displayUnitFor(rawUnit) {
+  return rawUnit === "degrees_celsius" && tempUnit === "F" ? "degrees_fahrenheit" : rawUnit;
+}
+
+function convertValue(value, rawUnit) {
+  if (rawUnit === "degrees_celsius" && tempUnit === "F") {
+    return value * 9 / 5 + 32;
+  }
+  return value;
+}
+
+const statusEl = document.getElementById("status");
+const emptyStateEl = document.getElementById("empty-state");
+const canvasEl = document.getElementById("chart");
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg || "";
+  statusEl.className = isError ? "error" : "";
+}
+
+function selectedSeriesKeys() {
+  return Array.from(document.querySelectorAll(".field-checkbox input:checked")).map(el => el.dataset.key);
+}
+
+async function loadDevices() {
+  const treeEl = document.getElementById("sensor-tree");
+  try {
+    const res = await fetch("/api/devices");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const locations = await res.json();
+
+    if (locations.length === 0) {
+      treeEl.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">No data collected yet.</p>';
+      return;
+    }
+
+    treeEl.innerHTML = "";
+    for (const loc of locations) {
+      const details = document.createElement("details");
+      details.className = "location-group";
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = loc.name;
+      details.appendChild(summary);
+
+      for (const dev of loc.devices) {
+        const devGroup = document.createElement("div");
+        devGroup.className = "device-group";
+        const devName = document.createElement("div");
+        devName.className = "device-name";
+        devName.textContent = dev.name + (dev.sensor_type ? ` (${dev.sensor_type})` : "");
+        devGroup.appendChild(devName);
+
+        for (const f of dev.fields) {
+          const key = `${dev.id}|${f.field}`;
+          allSeriesMeta[key] = {
+            deviceName: dev.name,
+            locationName: loc.name,
+            field: f.field,
+            unit: f.unit,
+          };
+
+          const wrap = document.createElement("label");
+          wrap.className = "field-checkbox";
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.dataset.key = key;
+          cb.dataset.deviceId = dev.id;
+          cb.dataset.field = f.field;
+          cb.addEventListener("change", refreshChart);
+          wrap.appendChild(cb);
+          const labelText = document.createElement("span");
+          labelText.textContent = f.field + (f.unit ? ` (${friendlyUnit(f.unit)})` : "");
+          wrap.appendChild(labelText);
+          devGroup.appendChild(wrap);
+        }
+        details.appendChild(devGroup);
+      }
+      treeEl.appendChild(details);
+    }
+  } catch (err) {
+    treeEl.innerHTML = '<p style="color:#e36f6f; font-size:0.85rem;">Failed to load sensors.</p>';
+    setStatus(`Failed to load sensor list: ${err.message}`, true);
+  }
+}
+
+function rangeQueryParams() {
+  if (customStart && customEnd) {
+    return `start=${encodeURIComponent(customStart)}&end=${encodeURIComponent(customEnd)}`;
+  }
+  return `range=${encodeURIComponent(currentRange)}`;
+}
+
+function formatTick(value, spanMs) {
+  const d = new Date(value);
+  if (spanMs <= 26 * 60 * 60 * 1000) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+async function refreshChart() {
+  const keys = selectedSeriesKeys();
+  if (keys.length === 0) {
+    emptyStateEl.style.display = "block";
+    canvasEl.style.display = "none";
+    if (chart) { chart.destroy(); chart = null; }
+    setStatus("");
+    return;
+  }
+
+  setStatus("Loading…");
+  try {
+    // device_id is the actual La Crosse device id, pulled from the
+    // checkbox's dataset (not the display name) so the query is exact.
+    const checkboxes = Array.from(document.querySelectorAll(".field-checkbox input:checked"));
+    const fetches = checkboxes.map(async cb => {
+      const key = cb.dataset.key;
+      const deviceId = cb.dataset.deviceId;
+      const field = cb.dataset.field;
+      const url = `/api/readings?device_id=${encodeURIComponent(deviceId)}&field=${encodeURIComponent(field)}&${rangeQueryParams()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${field}`);
+      const data = await res.json();
+      return { key, data };
+    });
+
+    const seriesResults = await Promise.all(fetches);
+
+    // Group by *display* unit, not raw unit -- so a Celsius field converted
+    // to Fahrenheit lands on the same axis as a field the API already
+    // reports in Fahrenheit (e.g. HeatIndex), instead of getting its own.
+    const displayUnits = [...new Set(seriesResults.map(r => displayUnitFor(r.data.unit) || "value"))];
+    const scales = { x: {
+      type: "linear",
+      ticks: {
+        color: "#8b98a5",
+        callback: function(value) {
+          const span = this.max - this.min;
+          return formatTick(value, span);
+        },
+      },
+      grid: { color: "#2c3b4a" },
+    }};
+    displayUnits.forEach((unit, i) => {
+      scales[`y-${unit}`] = {
+        type: "linear",
+        position: i % 2 === 0 ? "left" : "right",
+        title: { display: true, text: friendlyUnit(unit), color: "#8b98a5" },
+        ticks: { color: "#8b98a5" },
+        grid: { drawOnChartArea: i === 0, color: "#2c3b4a" },
+      };
+    });
+
+    const datasets = seriesResults.map((r, i) => {
+      const meta = allSeriesMeta[r.key];
+      const rawUnit = r.data.unit || "value";
+      const unit = displayUnitFor(rawUnit);
+      return {
+        label: `${meta.locationName} / ${meta.deviceName} / ${meta.field}${unit ? " (" + friendlyUnit(unit) + ")" : ""}`,
+        data: r.data.points.map(p => ({ x: new Date(p.ts).getTime(), y: convertValue(p.value, rawUnit) })),
+        borderColor: COLORS[i % COLORS.length],
+        backgroundColor: COLORS[i % COLORS.length],
+        yAxisID: `y-${unit}`,
+        pointRadius: 0,
+        borderWidth: 2,
+        tension: 0.15,
+      };
+    });
+
+    emptyStateEl.style.display = "none";
+    canvasEl.style.display = "block";
+
+    if (chart) {
+      chart.data.datasets = datasets;
+      chart.options.scales = scales;
+      chart.update();
+    } else {
+      chart = new Chart(canvasEl.getContext("2d"), {
+        type: "line",
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "nearest", axis: "x", intersect: false },
+          plugins: {
+            legend: { labels: { color: "#e6edf3", boxWidth: 12, font: { size: 11 } } },
+            tooltip: { mode: "nearest", intersect: false },
+          },
+          scales,
+        },
+      });
+    }
+
+    const totalPoints = seriesResults.reduce((sum, r) => sum + r.data.points.length, 0);
+    setStatus(`Updated ${new Date().toLocaleTimeString()} — ${totalPoints} point(s) across ${keys.length} series.`);
+  } catch (err) {
+    setStatus(`Failed to load readings: ${err.message}`, true);
+  }
+}
+
+document.getElementById("range-buttons").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-range]");
+  if (!btn) return;
+  customStart = null;
+  customEnd = null;
+  currentRange = btn.dataset.range;
+  document.querySelectorAll("#range-buttons button").forEach(b => b.classList.toggle("active", b === btn));
+  refreshChart();
+});
+
+document.getElementById("temp-unit-buttons").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-unit]");
+  if (!btn) return;
+  tempUnit = btn.dataset.unit;
+  document.querySelectorAll("#temp-unit-buttons button").forEach(b => b.classList.toggle("active", b === btn));
+  refreshChart();
+});
+
+document.getElementById("apply-custom-range").addEventListener("click", () => {
+  const s = document.getElementById("custom-start").value;
+  const e = document.getElementById("custom-end").value;
+  if (!s || !e) {
+    setStatus("Pick both a start and end for a custom range.", true);
+    return;
+  }
+  customStart = new Date(s).toISOString();
+  customEnd = new Date(e).toISOString();
+  document.querySelectorAll("#range-buttons button").forEach(b => b.classList.remove("active"));
+  refreshChart();
+});
+
+loadDevices();
+</script>
+</body>
+</html>

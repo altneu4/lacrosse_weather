@@ -1,0 +1,26 @@
+# Build context is the repo root (see docker-compose.yml).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY webapp/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY webapp/app.py .
+COPY webapp/static/ ./static/
+
+# No credentials are copied into the image -- the read-only DB role's
+# credentials are supplied at runtime via environment variables (see
+# docker-compose.yml / .env.example).
+
+# Run as a dedicated non-root user, same reasoning as the collector: this
+# service only reads from Postgres and serves static files, so it never
+# needs elevated privileges.
+RUN groupadd --system webapp \
+    && useradd --system --no-create-home --gid webapp webapp \
+    && chown -R webapp:webapp /app
+USER webapp
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

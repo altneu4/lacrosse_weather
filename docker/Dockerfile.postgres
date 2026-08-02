@@ -1,0 +1,13 @@
+# Build context is the repo root (see docker-compose.yml).
+#
+# A thin wrapper around the official postgres image that bakes in this
+# project's init scripts, instead of relying on a bind mount from the repo's
+# db/init/ folder. Makes the image self-contained: a separate deployment
+# (another server, Kubernetes) can pull it directly with no dependency on
+# this source tree being present. Runtime behavior is unchanged -- postgres's
+# entrypoint still runs everything under /docker-entrypoint-initdb.d/ in
+# lexical order on first init of an empty data directory, regardless of
+# whether the files got there via COPY (here) or a bind mount (before).
+FROM postgres:16-alpine
+
+COPY db/init/ /docker-entrypoint-initdb.d/

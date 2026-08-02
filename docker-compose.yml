@@ -1,6 +1,15 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # Same build+image pattern as collector/webapp below -- FROM
+    # postgres:16-alpine with db/init/ baked in (see docker/Dockerfile.postgres)
+    # instead of bind-mounted, so this image is self-contained and published
+    # to GHCR for a separate deployment to pull directly. `docker compose
+    # build`/`up --build` still work as before, just building this instead of
+    # pulling the stock postgres image.
+    image: ghcr.io/altneu4/lacrosse-postgres:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-lacrosse}
@@ -28,8 +37,6 @@ services:
       # lost anyway, 01-restore-from-backup.sh below recovers from the most
       # recent nightly backup automatically.
       - pgdata:/var/lib/postgresql/data
-      # Only runs on first initialization of an empty data directory.
-      - ./db/init:/docker-entrypoint-initdb.d:ro
       # Read-only access to the same backup files the `backup` service
       # writes, so 01-restore-from-backup.sh can find the latest one.
       - ${BACKUP_HOST_PATH:?BACKUP_HOST_PATH must be set in .env}:/backups-restore:ro

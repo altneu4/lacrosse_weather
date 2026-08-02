@@ -35,6 +35,8 @@ jobs:
             dockerfile: docker/Dockerfile
           - image: lacrosse-webapp
             dockerfile: docker/Dockerfile.webapp
+          - image: lacrosse-postgres
+            dockerfile: docker/Dockerfile.postgres
     steps:
       - name: Checkout
         uses: actions/checkout@v4

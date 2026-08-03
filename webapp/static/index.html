@@ -35,20 +35,53 @@
     color: var(--muted);
     font-size: 0.85rem;
   }
+  #toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    align-items: flex-start;
+  }
+  .toolbar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 160px;
+  }
+  .toolbar-group h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0;
+  }
+  #sidebar-toggle {
+    display: none;
+    margin-left: auto;
+    align-self: center;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    gap: 6px;
+  }
   main {
     display: flex;
     gap: 20px;
     padding: 20px 24px;
     align-items: flex-start;
-    flex-wrap: wrap;
   }
   #sidebar {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
-    min-width: 240px;
-    max-width: 300px;
+    width: 260px;
     flex-shrink: 0;
   }
   #sidebar h2 {
@@ -58,6 +91,14 @@
     color: var(--muted);
     margin: 0 0 10px;
   }
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .sidebar-header h2 { margin: 0 0 10px; }
+  #sidebar-close { display: none; }
+  #sidebar-backdrop { display: none; }
   .location-group { margin-bottom: 14px; }
   .location-group > summary {
     cursor: pointer;
@@ -136,6 +177,24 @@
     padding: 6px 8px;
     font-size: 0.8rem;
   }
+  .refresh-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .refresh-controls .sidebar-select { flex: 1; }
+  .refresh-controls button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .refresh-controls button:hover { border-color: var(--accent); }
   #content {
     flex: 1;
     min-width: 320px;
@@ -160,6 +219,57 @@
     margin-top: 60px;
     font-size: 0.9rem;
   }
+
+  /* Below this width, the sensor sidebar becomes an off-canvas drawer
+     (toggled by #sidebar-toggle in the toolbar) instead of a permanent
+     column, so the chart gets the full width on tablets/phones. The
+     toolbar's own controls (Auto-Refresh/Timeline/Compare/Units) already
+     wrap onto multiple rows via #toolbar's flex-wrap at any width -- no
+     extra rule needed for that down to this breakpoint. */
+  @media (max-width: 860px) {
+    #sidebar-toggle { display: inline-flex; }
+
+    #sidebar {
+      position: fixed;
+      top: 0;
+      left: -100%;
+      height: 100vh;
+      width: 85vw;
+      max-width: 320px;
+      z-index: 100;
+      border-radius: 0;
+      overflow-y: auto;
+      transition: left 0.25s ease;
+      box-shadow: 2px 0 16px rgba(0, 0, 0, 0.4);
+    }
+    #sidebar.open { left: 0; }
+
+    #sidebar-close {
+      display: inline-flex;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 1.4rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    #sidebar-backdrop.visible {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 90;
+    }
+  }
+
+  /* Below this width even a two-up toolbar row feels cramped -- each
+     control group takes the full row instead of sharing one with a
+     neighbor. */
+  @media (max-width: 480px) {
+    .toolbar-group { flex: 1 1 100%; min-width: 0; }
+    #sidebar-toggle { margin-left: 0; width: 100%; justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -167,8 +277,22 @@
   <h1>La Crosse Weather Dashboard</h1>
   <p>Select one or more sensors and a timeline to plot.</p>
 </header>
-<main>
-  <aside id="sidebar">
+<div id="toolbar">
+  <div class="toolbar-group">
+    <h2>Auto-Refresh</h2>
+    <div class="refresh-controls">
+      <select class="sidebar-select" id="auto-refresh-select">
+        <option value="0">Off</option>
+        <option value="1">1 min</option>
+        <option value="5" selected>5 min</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+      </select>
+      <button id="refresh-now-button" title="Refresh now">&#8635;</button>
+    </div>
+  </div>
+
+  <div class="toolbar-group">
     <h2>Timeline</h2>
     <div class="range-buttons" id="range-buttons">
       <button data-range="24h" class="active">24h</button>
@@ -184,22 +308,39 @@
         <button id="apply-custom-range">Apply</button>
       </div>
     </details>
+  </div>
 
-    <h2 style="margin-top:18px;">Compare To</h2>
+  <div class="toolbar-group">
+    <h2>Compare To</h2>
     <select class="sidebar-select" id="compare-select">
       <option value="none">None</option>
       <option value="previous">Previous period</option>
       <option value="month">Same time, 1 month ago</option>
       <option value="year">Same time, 1 year ago</option>
     </select>
+  </div>
 
-    <h2 style="margin-top:18px;">Temperature Units</h2>
+  <div class="toolbar-group">
+    <h2>Temperature Units</h2>
     <div class="range-buttons" id="temp-unit-buttons">
       <button data-unit="C" class="active">&deg;C</button>
       <button data-unit="F">&deg;F</button>
     </div>
+  </div>
 
-    <h2 style="margin-top:18px;">Sensors</h2>
+  <!-- Hidden on wide screens (see #sidebar-toggle in <style>); opens the
+       sensor picker as a drawer on tablets/phones instead of it eating
+       vertical space above the chart. -->
+  <button id="sidebar-toggle">&#9776; Sensors</button>
+</div>
+
+<main>
+  <div id="sidebar-backdrop"></div>
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h2>Sensors</h2>
+      <button id="sidebar-close" aria-label="Close sensor list">&times;</button>
+    </div>
     <div id="sensor-tree">Loading&hellip;</div>
   </aside>
 
@@ -267,6 +408,35 @@ function selectedSeriesKeys() {
   return Array.from(document.querySelectorAll(".field-checkbox input:checked")).map(el => el.dataset.key);
 }
 
+// Every control below changes state (selection, range, unit, compare mode)
+// immediately, but the actual fetch+redraw is debounced through this rather
+// than called directly. Each refreshChart() re-fetches *every* currently
+// selected series, not just what just changed -- so checking N sensors one
+// at a time without this would cost 1+2+...+N requests, not N, and could
+// trip the dashboard's own rate limits on nothing but its own UI.
+let refreshDebounceTimer = null;
+function scheduleRefresh(delayMs = 1000) {
+  clearTimeout(refreshDebounceTimer);
+  refreshDebounceTimer = setTimeout(refreshChart, delayMs);
+}
+
+// Periodic background refresh, independent of the debounce above -- fires
+// on a fixed schedule regardless of user interaction, so new readings the
+// collector writes (every COLLECTION_INTERVAL_MINUTES, 15 by default) show
+// up without needing to touch a control. Calls refreshChart() directly
+// rather than through scheduleRefresh(), since there's no rapid-fire
+// clicking to coalesce here -- just a plain timer tick.
+let autoRefreshTimer = null;
+function setAutoRefresh(minutes) {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  if (minutes > 0) {
+    autoRefreshTimer = setInterval(refreshChart, minutes * 60 * 1000);
+  }
+}
+
 async function loadDevices() {
   const treeEl = document.getElementById("sensor-tree");
   try {
@@ -312,7 +482,7 @@ async function loadDevices() {
           cb.dataset.key = key;
           cb.dataset.deviceId = dev.id;
           cb.dataset.field = f.field;
-          cb.addEventListener("change", refreshChart);
+          cb.addEventListener("change", () => scheduleRefresh());
           wrap.appendChild(cb);
           const labelText = document.createElement("span");
           labelText.textContent = f.field + (f.unit ? ` (${friendlyUnit(f.unit)})` : "");
@@ -549,12 +719,12 @@ document.getElementById("range-buttons").addEventListener("click", (e) => {
   customEnd = null;
   currentRange = btn.dataset.range;
   document.querySelectorAll("#range-buttons button").forEach(b => b.classList.toggle("active", b === btn));
-  refreshChart();
+  scheduleRefresh();
 });
 
 document.getElementById("compare-select").addEventListener("change", (e) => {
   compareMode = e.target.value;
-  refreshChart();
+  scheduleRefresh();
 });
 
 document.getElementById("temp-unit-buttons").addEventListener("click", (e) => {
@@ -562,7 +732,7 @@ document.getElementById("temp-unit-buttons").addEventListener("click", (e) => {
   if (!btn) return;
   tempUnit = btn.dataset.unit;
   document.querySelectorAll("#temp-unit-buttons button").forEach(b => b.classList.toggle("active", b === btn));
-  refreshChart();
+  scheduleRefresh();
 });
 
 document.getElementById("apply-custom-range").addEventListener("click", () => {
@@ -575,8 +745,43 @@ document.getElementById("apply-custom-range").addEventListener("click", () => {
   customStart = new Date(s).toISOString();
   customEnd = new Date(e).toISOString();
   document.querySelectorAll("#range-buttons button").forEach(b => b.classList.remove("active"));
+  scheduleRefresh();
+});
+
+document.getElementById("auto-refresh-select").addEventListener("change", (e) => {
+  setAutoRefresh(Number(e.target.value));
+});
+
+document.getElementById("refresh-now-button").addEventListener("click", () => {
+  // Bypass the debounce entirely -- this is an explicit, deliberate request
+  // for fresh data right now, not a rapid-fire selection to coalesce.
+  clearTimeout(refreshDebounceTimer);
   refreshChart();
 });
+
+// Matches the <select>'s "selected" option (5 min) above.
+setAutoRefresh(5);
+
+// Sensor sidebar as an off-canvas drawer on narrow screens (see the
+// #sidebar media query in <style>). These elements/listeners exist at any
+// width, but only visibly do anything below that breakpoint -- the toggle
+// button is hidden by CSS on wide screens, and toggling .open on #sidebar
+// has no visual effect there since #sidebar isn't position:fixed yet.
+const sidebarEl = document.getElementById("sidebar");
+const sidebarBackdropEl = document.getElementById("sidebar-backdrop");
+
+function openSidebar() {
+  sidebarEl.classList.add("open");
+  sidebarBackdropEl.classList.add("visible");
+}
+function closeSidebar() {
+  sidebarEl.classList.remove("open");
+  sidebarBackdropEl.classList.remove("visible");
+}
+
+document.getElementById("sidebar-toggle").addEventListener("click", openSidebar);
+document.getElementById("sidebar-close").addEventListener("click", closeSidebar);
+sidebarBackdropEl.addEventListener("click", closeSidebar);
 
 loadDevices();
 </script>

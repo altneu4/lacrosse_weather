@@ -33,6 +33,14 @@ from starlette.responses import JSONResponse
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
+
+def _env(name: str, default: Optional[str] = None, required: bool = False) -> str:
+    value = os.environ.get(name, default)
+    if required and not value:
+        raise RuntimeError(f"Required environment variable {name} is not set")
+    return value
+
+
 # Deliberately generic -- slowapi's default handler echoes back the exact
 # limit ("30 per 1 minute"), which just tells anyone probing this exactly
 # where the threshold is so they can stay a request under it. Used for both
@@ -113,10 +121,14 @@ limiter = Limiter(key_func=get_remote_address)
 # /api/health is deliberately excluded -- it's a cheap SELECT 1 used for
 # Docker healthchecks and manual troubleshooting, and shouldn't compete
 # with dashboard traffic for the same budget.
+#
+# Configurable via .env (see .env.example for format and guidance), but
+# these are meant to stay a loose backstop -- to tune actual dashboard
+# behavior, adjust the per-endpoint limits below instead of these.
 _blanket_storage = MemoryStorage()
 _blanket_limiter = FixedWindowRateLimiter(_blanket_storage)
-_BLANKET_IP_LIMIT = parse_rate_limit("300/minute")
-_BLANKET_SESSION_LIMIT = parse_rate_limit("150/minute")
+_BLANKET_IP_LIMIT = parse_rate_limit(_env("WEBAPP_RATE_LIMIT_BLANKET_PER_IP", "300/minute"))
+_BLANKET_SESSION_LIMIT = parse_rate_limit(_env("WEBAPP_RATE_LIMIT_BLANKET_PER_SESSION", "150/minute"))
 
 
 class BlanketApiRateLimitMiddleware(BaseHTTPMiddleware):
@@ -130,13 +142,6 @@ class BlanketApiRateLimitMiddleware(BaseHTTPMiddleware):
             if not _blanket_limiter.hit(_BLANKET_SESSION_LIMIT, "blanket-session", session_key):
                 return JSONResponse({"error": RATE_LIMIT_MESSAGE}, status_code=429)
         return await call_next(request)
-
-
-def _env(name: str, default: Optional[str] = None, required: bool = False) -> str:
-    value = os.environ.get(name, default)
-    if required and not value:
-        raise RuntimeError(f"Required environment variable {name} is not set")
-    return value
 
 
 POSTGRES_HOST = _env("POSTGRES_HOST", "postgres")
@@ -175,8 +180,8 @@ app.add_middleware(SessionMiddleware)
 
 
 @app.get("/api/devices")
-@limiter.limit("60/minute")  # per source IP
-@limiter.limit("30/minute", key_func=get_session_key)  # per browser session
+@limiter.limit(_env("WEBAPP_RATE_LIMIT_DEVICES_PER_IP", "60/minute"))
+@limiter.limit(_env("WEBAPP_RATE_LIMIT_DEVICES_PER_SESSION", "30/minute"), key_func=get_session_key)
 def list_devices(request: Request):
     """Locations -> devices -> distinct fields/units, to populate the pickers."""
     query = """
@@ -211,8 +216,8 @@ def list_devices(request: Request):
 
 
 @app.get("/api/readings")
-@limiter.limit("120/minute")  # per source IP
-@limiter.limit("60/minute", key_func=get_session_key)  # per browser session
+@limiter.limit(_env("WEBAPP_RATE_LIMIT_READINGS_PER_IP", "120/minute"))
+@limiter.limit(_env("WEBAPP_RATE_LIMIT_READINGS_PER_SESSION", "60/minute"), key_func=get_session_key)
 def get_readings(
     request: Request,
     device_id: str,

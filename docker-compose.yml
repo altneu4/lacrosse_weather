@@ -157,6 +157,14 @@ services:
       # above) -- the dashboard can't do anything useful without this role,
       # so fail fast with a clear message instead of a psycopg error.
       WEBAPP_DB_PASSWORD: ${WEBAPP_DB_PASSWORD:?WEBAPP_DB_PASSWORD must be set in .env to use the web dashboard}
+      # Rate limits for the dashboard's API -- see .env.example for format
+      # and guidance before changing these.
+      WEBAPP_RATE_LIMIT_DEVICES_PER_IP: ${WEBAPP_RATE_LIMIT_DEVICES_PER_IP:-60/minute}
+      WEBAPP_RATE_LIMIT_DEVICES_PER_SESSION: ${WEBAPP_RATE_LIMIT_DEVICES_PER_SESSION:-30/minute}
+      WEBAPP_RATE_LIMIT_READINGS_PER_IP: ${WEBAPP_RATE_LIMIT_READINGS_PER_IP:-120/minute}
+      WEBAPP_RATE_LIMIT_READINGS_PER_SESSION: ${WEBAPP_RATE_LIMIT_READINGS_PER_SESSION:-60/minute}
+      WEBAPP_RATE_LIMIT_BLANKET_PER_IP: ${WEBAPP_RATE_LIMIT_BLANKET_PER_IP:-300/minute}
+      WEBAPP_RATE_LIMIT_BLANKET_PER_SESSION: ${WEBAPP_RATE_LIMIT_BLANKET_PER_SESSION:-150/minute}
 
 volumes:
   pgdata:

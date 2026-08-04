@@ -52,6 +52,17 @@ services:
     # as the tag pushed to GHCR by .github/workflows/publish-images.yml, so a
     # separate deployment (another server, Kubernetes) can just `docker pull`
     # / reference this image instead of needing the source tree to build it.
+    #
+    # Gated behind the "collector" profile: a bare `docker compose up -d`
+    # starts postgres/backup/webapp but NOT this, so a workstation checkout
+    # used for webapp development doesn't also poll the real La Crosse
+    # account and write to the shared database. Enable it with either:
+    #   docker compose --profile collector up -d
+    #   docker compose up -d collector          (naming it explicitly also works)
+    # On a real deployment, set COMPOSE_PROFILES=collector in .env instead,
+    # so it's always included without typing --profile every time (see
+    # .env.example).
+    profiles: ["collector"]
     image: ghcr.io/altneu4/lacrosse-collector:latest
     build:
       context: .

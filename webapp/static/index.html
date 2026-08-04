@@ -566,6 +566,24 @@ function formatTick(value, spanMs) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// Tooltip title always shows full date + time, unlike formatTick above --
+// that one deliberately drops the date on short ranges to keep axis labels
+// short, but a hover tooltip has room and shouldn't be ambiguous about
+// which day a point falls on. Chart.js's own default title callback just
+// prints the raw x value for a linear scale (hence the giant epoch-ms
+// number), so this replaces it.
+function formatTooltipTitle(items) {
+  if (!items.length) return "";
+  const d = new Date(items[0].parsed.x);
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 async function refreshChart() {
   const keys = selectedSeriesKeys();
   if (keys.length === 0) {
@@ -696,7 +714,7 @@ async function refreshChart() {
           interaction: { mode: "nearest", axis: "x", intersect: false },
           plugins: {
             legend: { labels: { color: "#e6edf3", boxWidth: 12, font: { size: 11 } } },
-            tooltip: { mode: "nearest", intersect: false },
+            tooltip: { mode: "nearest", intersect: false, callbacks: { title: formatTooltipTitle } },
           },
           scales,
         },
